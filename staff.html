@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>หน้าจอครัว / บาร์</title>
+<style>
+:root{--bg:#f4f2ee;--card:#fff;--text:#1f1d1a;--muted:#77716a;--line:#e0dbd3;--new:#d9480f;--cook:#b7791f;--done:#2f855a}
+@media (prefers-color-scheme:dark){:root{--bg:#161412;--card:#232020;--text:#f2efea;--muted:#a09a92;--line:#3a3632}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,"Noto Sans Thai",sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg)}
+h1{margin:0;font-size:18px}
+.sm{padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
+.wrap{max-width:720px;margin:0 auto;padding:12px}
+.login{max-width:360px;margin:60px auto;padding:16px}
+.login input{width:100%;padding:12px;margin:6px 0;border-radius:10px;border:1px solid var(--line);font:inherit;background:var(--card);color:var(--text)}
+.big{width:100%;padding:14px;border:0;border-radius:12px;background:var(--new);color:#fff;font:inherit;font-size:17px;margin-top:8px}
+.card{background:var(--card);border:1px solid var(--line);border-left:8px solid var(--new);border-radius:12px;padding:12px;margin-bottom:10px}
+.card.cooking{border-left-color:var(--cook)}.card.done{border-left-color:var(--done)}
+.top{display:flex;justify-content:space-between;align-items:baseline}
+.tbl{font-size:26px;font-weight:700}.t{color:var(--muted);font-size:13px}
+.name{font-size:19px;margin:4px 0}.note{color:var(--cook);margin:2px 0}
+.act{width:100%;margin-top:8px;padding:12px;border:0;border-radius:10px;background:var(--text);color:var(--bg);font:inherit;font-size:16px}
+.empty,.err{text-align:center;color:var(--muted);padding:40px 0}.err{color:var(--new)}
+.st button{display:block;width:100%;margin:8px 0;padding:16px;font:inherit;font-size:18px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--text)}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+var URL_="https://mbpbblyidqhxfywirpic.supabase.co";
+var KEY="sb_publishable_OjyM_tQDyI5j4cL78xcE8A_QtTlYric";
+var S=null,stations=[],station=null,seen={},first=true,timer=null,ctx=null,items=[];
+try{S=JSON.parse(localStorage.getItem("s"))}catch(e){}
+try{station=JSON.parse(localStorage.getItem("st"))}catch(e){}
+document.addEventListener("click",function(){if(!ctx){try{ctx=new (window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(ctx&&ctx.resume)ctx.resume()});
+function $(h){document.getElementById("app").innerHTML=h}
+function esc(s){var d=document.createElement("div");d.textContent=s==null?"":s;return d.innerHTML}
+function beep(){if(!ctx)return;try{var o=ctx.createOscillator();o.frequency.value=880;o.connect(ctx.destination);o.start();setTimeout(function(){o.stop()},400)}catch(e){}}
+function save(){localStorage.setItem("s",JSON.stringify(S))}
+function logout(){S=null;localStorage.removeItem("s");clearInterval(timer);view()}
+function refresh(){return fetch(URL_+"/auth/v1/token?grant_type=refresh_token",{method:"POST",headers:{apikey:KEY,"Content-Type":"application/json"},body:JSON.stringify({refresh_token:S.refresh_token})}).then(function(r){if(!r.ok){logout();throw new Error("auth")}return r.json()}).then(function(d){S=d;save()})}
+function api(path,method,body,retry){
+  return fetch(URL_+path,{method:method||"GET",headers:{apikey:KEY,"Content-Type":"application/json",Authorization:"Bearer "+S.access_token},body:body?JSON.stringify(body):undefined}).then(function(r){
+    if(r.status===401&&!retry)return refresh().then(function(){return api(path,method,body,true)});
+    if(!r.ok)throw new Error(r.status);
+    return r.text().then(function(t){return t?JSON.parse(t):null});
+  });
+}
+function view(){
+  if(!S){$('<div class="login"><h1>เข้าสู่ระบบพนักงาน</h1><input id="em" type="email" placeholder="อีเมล" autocapitalize="off"><input id="pw" type="password" placeholder="รหัสผ่าน"><button class="big" onclick="login()">เข้าสู่ระบบ</button><div id="msg" class="err"></div></div>');return}
+  if(!station){pick();return}
+  board();
+}
+function login(){
+  var em=document.getElementById("em").value.trim(),pw=document.getElementById("pw").value;
+  fetch(URL_+"/auth/v1/token?grant_type=password",{method:"POST",headers:{apikey:KEY,"Content-Type":"application/json"},body:JSON.stringify({email:em,password:pw})}).then(function(r){if(!r.ok)throw new Error();return r.json()}).then(function(d){S=d;save();view()}).catch(function(){document.getElementById("msg").textContent="อีเมลหรือรหัสผ่านไม่ถูกต้อง"});
+}
+function pick(){
+  api("/rest/v1/stations?select=id,name&order=name").then(function(r){
+    stations=r;var h='<div class="login st"><h1>เลือกจุดบริการ</h1>';
+    r.forEach(function(s,i){h+='<button onclick="setSt('+i+')">'+esc(s.name)+'</button>'});
+    h+='<button onclick="logout()" style="font-size:14px">ออกจากระบบ</button></div>';$(h);
+  }).catch(function(){$('<div class="err">โหลดไม่ได้ ลองใหม่</div><div class="login"><button class="big" onclick="logout()">ออกจากระบบ</button></div>')});
+}
+function setSt(i){station=stations[i];localStorage.setItem("st",JSON.stringify(station));first=true;seen={};view()}
+function board(){
+  $('<header><h1>'+esc(station.name)+'</h1><div><button class="sm" onclick="change()">เปลี่ยนจุด</button> <button class="sm" onclick="logout()">ออก</button></div></header><div class="wrap" id="list"></div>');
+  poll();clearInterval(timer);timer=setInterval(poll,5000);
+}
+function change(){station=null;localStorage.removeItem("st");clearInterval(timer);view()}
+function poll(){
+  api("/rest/v1/order_items?select=id,name,qty,status,created_at,orders(note,bills(tables(label)))&status=in.(new,cooking,done)&station_id=eq."+station.id+"&order=created_at.asc").then(function(r){
+    var fresh=false;r.forEach(function(x){if(!seen[x.id]){seen[x.id]=1;if(x.status==="new"&&!first)fresh=true}});
+    if(fresh)beep();first=false;items=r;draw();
+  }).catch(function(){var l=document.getElementById("list");if(l&&S)l.insertAdjacentHTML("afterbegin",'<div class="err">เชื่อมต่อไม่ได้ กำลังลองใหม่…</div>')});
+}
+var NEXT={"new":["cooking","เริ่มทำ"],"cooking":["done","เสร็จแล้ว"],"done":["served","เสิร์ฟแล้ว"]};
+function ago(t){var m=Math.floor((Date.now()-new Date(t))/60000);return m<1?"เมื่อสักครู่":m+" นาทีที่แล้ว"}
+function draw(){
+  var l=document.getElementById("list");if(!l)return;
+  if(!items.length){l.innerHTML='<div class="empty">ยังไม่มีออเดอร์ค้าง</div>';return}
+  var h="";items.forEach(function(x){
+    var o=x.orders||{},b=o.bills||{},t=b.tables||{},n=NEXT[x.status];
+    h+='<div class="card '+x.status+'"><div class="top"><span class="tbl">โต๊ะ '+esc(t.label)+'</span><span class="t">'+ago(x.created_at)+'</span></div><div class="name">'+esc(x.name)+' × '+x.qty+'</div>'+(o.note?'<div class="note">หมายเหตุ: '+esc(o.note)+'</div>':'')+'<button class="act" onclick="step(\''+x.id+'\',\''+n[0]+'\')">'+n[1]+'</button></div>';
+  });
+  l.innerHTML=h;
+}
+function step(id,st){api("/rest/v1/order_items?id=eq."+id,"PATCH",{status:st}).then(poll).catch(function(){alert("อัปเดตไม่สำเร็จ ลองอีกครั้ง")})}
+view();
+</script>
+</body>
+</html>
