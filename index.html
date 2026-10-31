@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>สั่งอาหาร</title>
+<style>
+:root{--bg:#faf8f5;--card:#fff;--text:#222;--muted:#777;--accent:#d9480f;--line:#e8e4de}
+@media (prefers-color-scheme:dark){:root{--bg:#171513;--card:#242120;--text:#f2efea;--muted:#a09a92;--accent:#ff8a4c;--line:#363230}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,"Noto Sans Thai",sans-serif;padding-bottom:90px}
+header{padding:16px;border-bottom:1px solid var(--line)}
+h1{margin:0;font-size:20px}header p{margin:4px 0 0;color:var(--muted);font-size:14px}
+h3{margin:18px 16px 8px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 16px 10px;padding:12px;background:var(--card);border:1px solid var(--line);border-radius:12px}
+.item span{color:var(--muted);font-size:14px;display:block}
+.qty{display:flex;align-items:center;gap:10px}
+.qty button{width:36px;height:36px;border-radius:50%;border:1px solid var(--accent);background:none;color:var(--accent);font-size:20px}
+.qty .add{background:var(--accent);color:#fff}
+#bar{position:fixed;left:0;right:0;bottom:0;padding:12px 16px;background:var(--bg);border-top:1px solid var(--line)}
+.btn{width:100%;padding:14px;border:0;border-radius:12px;background:var(--accent);color:#fff;font-size:17px}
+.btn:disabled{opacity:.4}.ghost{background:none;color:var(--muted);margin-top:6px}
+#sheet{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end}
+#sheet.show{display:flex}
+#box{background:var(--bg);width:100%;max-height:85%;overflow:auto;border-radius:16px 16px 0 0;padding:16px}
+.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)}
+textarea{width:100%;margin:12px 0;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text);font:inherit}
+.msg{padding:40px 16px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<header><h1 id="shop">กำลังโหลด…</h1><p id="tbl"></p></header>
+<main id="list"></main>
+<div id="bar"><button class="btn" id="open" disabled>ยังไม่ได้เลือกรายการ</button></div>
+<div id="sheet"><div id="box"></div></div>
+<script>
+var SUPABASE_URL="https://mbpbblyidqhxfywirpic.supabase.co";
+var SUPABASE_KEY="sb_publishable_OjyM_tQDyI5j4cL78xcE8A_QtTlYric";
+var token=new URLSearchParams(location.search).get("t");
+var data=null,cart={};
+function rpc(fn,body){
+  return fetch(SUPABASE_URL+"/rest/v1/rpc/"+fn,{method:"POST",
+    headers:{"apikey":SUPABASE_KEY,"Content-Type":"application/json"},
+    body:JSON.stringify(body)}).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()});
+}
+function money(n){return Number(n).toLocaleString("th-TH")+" ฿"}
+function esc(s){var d=document.createElement("div");d.textContent=s;return d.innerHTML}
+function load(){
+  if(!token){fail("ลิงก์ไม่ถูกต้อง กรุณาสแกน QR ที่โต๊ะอีกครั้ง");return}
+  rpc("get_menu",{p_token:token}).then(function(d){
+    if(!d){fail("ไม่พบโต๊ะนี้ กรุณาเรียกพนักงาน");return}
+    data=d;document.getElementById("shop").textContent=d.restaurant;
+    document.getElementById("tbl").textContent="โต๊ะ "+d.table;draw();
+  }).catch(function(){fail("เชื่อมต่อไม่ได้ กรุณาลองใหม่")});
+}
+function fail(m){document.getElementById("shop").textContent="สั่งอาหาร";document.getElementById("list").innerHTML='<div class="msg">'+m+"</div>"}
+function draw(){
+  var h="";
+  data.categories.forEach(function(c){
+    h+="<h3>"+esc(c.name)+"</h3>";
+    c.items.forEach(function(it){
+      var n=cart[it.id]||0;
+      h+='<div class="item"><div><b>'+esc(it.name)+"</b><span>"+money(it.price)+'</span></div><div class="qty">'+
+      (n?'<button onclick="chg(\''+it.id+'\',-1)">−</button><b>'+n+"</b>":"")+
+      '<button class="add" onclick="chg(\''+it.id+'\',1)">+</button></div></div>';
+    });
+  });
+  document.getElementById("list").innerHTML=h;bar();
+}
+function lines(){var out=[];data.categories.forEach(function(c){c.items.forEach(function(it){var n=cart[it.id]||0;if(n)out.push({id:it.id,name:it.name,price:it.price,qty:n})})});return out}
+function bar(){var L=lines(),n=0,t=0;L.forEach(function(l){n+=l.qty;t+=l.qty*l.price});
+  var b=document.getElementById("open");b.disabled=!n;b.textContent=n?"ดูตะกร้า · "+n+" รายการ · "+money(t):"ยังไม่ได้เลือกรายการ"}
+function chg(id,d){cart[id]=Math.max(0,(cart[id]||0)+d);draw()}
+function sheet(h){document.getElementById("box").innerHTML=h;document.getElementById("sheet").className="show"}
+function closeSheet(){document.getElementById("sheet").className=""}
+document.getElementById("open").onclick=function(){
+  var L=lines(),t=0,h="<h2>ตะกร้า</h2>";
+  L.forEach(function(l){t+=l.qty*l.price;h+='<div class="row"><span>'+esc(l.name)+" × "+l.qty+"</span><span>"+money(l.qty*l.price)+"</span></div>"});
+  h+='<div class="row"><b>รวม</b><b>'+money(t)+'</b></div><textarea id="note" rows="2" placeholder="หมายเหตุ เช่น ไม่เผ็ด ไม่ใส่ผัก"></textarea>'+
+  '<button class="btn" id="send" onclick="send()">ส่งออเดอร์</button><button class="btn ghost" onclick="closeSheet()">กลับไปเลือกเพิ่ม</button>';
+  sheet(h)};
+function send(){
+  var b=document.getElementById("send");b.disabled=true;b.textContent="กำลังส่ง…";
+  var items=lines().map(function(l){return{id:l.id,qty:l.qty}});
+  rpc("place_order",{p_token:token,p_items:items,p_note:document.getElementById("note").value||null}).then(function(){
+    cart={};draw();
+    sheet('<div class="msg"><h2>ส่งออเดอร์แล้ว ✓</h2><p>ทางร้านได้รับรายการของคุณแล้ว</p></div><button class="btn" onclick="closeSheet()">สั่งเพิ่ม</button>');
+  }).catch(function(){b.disabled=false;b.textContent="ส่งไม่สำเร็จ ลองอีกครั้ง"});
+}
+load();
+</script>
+</body>
+</html>
