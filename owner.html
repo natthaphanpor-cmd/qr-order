@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>เจ้าของร้าน</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
 :root{--bg:#f4f2ee;--card:#fff;--text:#1f1d1a;--muted:#77716a;--line:#e0dbd3;--acc:#d9480f;--ok:#2f855a}
 @media (prefers-color-scheme:dark){:root{--bg:#161412;--card:#232020;--text:#f2efea;--muted:#a09a92;--line:#3a3632}}
@@ -39,6 +40,11 @@ h1{margin:0;font-size:18px}
 .stat{display:flex;gap:10px;margin-bottom:12px}.stat>div{flex:1;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
 .stat b{display:block;font-size:22px}.stat span{color:var(--muted);font-size:13px}
 .pl{display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:20;padding:16px}
+.mbox{background:var(--bg);border-radius:16px;padding:18px;width:100%;max-width:360px;text-align:center}
+.mbox h2{margin:0}.amt{font-size:34px;font-weight:700;color:var(--acc);margin:4px 0 10px}
+#qrc{display:inline-block;background:#fff;padding:12px;border-radius:12px;margin-bottom:10px}
+.who{font-size:14px;margin-bottom:6px}
 </style>
 </head>
 <body>
@@ -46,6 +52,7 @@ h1{margin:0;font-size:18px}
 <script>
 var URL_="https://mbpbblyidqhxfywirpic.supabase.co";
 var KEY="sb_publishable_OjyM_tQDyI5j4cL78xcE8A_QtTlYric";
+var PP_AID="A000000677010111",PP_ID="004999206863978",PP_NAME="ร้านก๋วยเตี๋ยวป้าจวบ หม้อดำ ม.ท.1";
 var S=null,tab="open",bills=[],paid=[],seen={},first=true,timer=null,ctx=null;
 try{S=JSON.parse(localStorage.getItem("s"))}catch(e){}
 document.addEventListener("click",function(){if(!ctx){try{ctx=new (window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(ctx&&ctx.resume)ctx.resume()});
@@ -63,6 +70,9 @@ function api(path,method,body,retry){
     return r.text().then(function(t){return t?JSON.parse(t):null});
   });
 }
+function tlv(t,v){return t+("0"+v.length).slice(-2)+v}
+function crc16(s){var c=0xFFFF;for(var i=0;i<s.length;i++){c^=s.charCodeAt(i)<<8;for(var j=0;j<8;j++){c=(c&0x8000)?((c<<1)^0x1021):(c<<1);c&=0xFFFF}}return("000"+c.toString(16).toUpperCase()).slice(-4)}
+function ppPayload(amt){var p="000201010212"+tlv("29",tlv("00",PP_AID)+tlv("03",PP_ID))+"5303764"+tlv("54",Number(amt).toFixed(2))+"5802TH6304";return p+crc16(p)}
 function view(){
   if(!S){$('<div class="login"><h1>เข้าสู่ระบบเจ้าของร้าน</h1><input id="em" type="email" placeholder="อีเมล" autocapitalize="off"><input id="pw" type="password" placeholder="รหัสผ่าน"><button class="big" onclick="login()">เข้าสู่ระบบ</button><div id="msg" class="err"></div></div>');return}
   shell();
@@ -120,11 +130,28 @@ function drawSum(){
   rows.forEach(function(x){var d=new Date(x.b.paid_at);h+='<div class="pl"><span>โต๊ะ '+esc((x.b.tables||{}).label)+' · '+d.toLocaleTimeString("th-TH",{hour:"2-digit",minute:"2-digit"})+' · '+(x.b.paid_method==="cash"?"เงินสด":"โอน")+'</span><b>'+money(x.t)+'</b></div>'});
   l.innerHTML=h+'</div>';
 }
+function payBill(id,method){
+  api("/rest/v1/bills?id=eq."+id,"PATCH",{status:"paid",paid_method:method,paid_at:new Date().toISOString()}).then(poll).catch(function(){alert("ปิดบิลไม่สำเร็จ ลองอีกครั้ง")});
+}
 function closeBill(i,method){
   var b=bills[i];if(!b)return;
-  var t=total(itemsOf(b));
-  if(!confirm("ปิดบิลโต๊ะ "+((b.tables||{}).label)+"\nยอด "+money(t)+"\nชำระด้วย"+(method==="cash"?"เงินสด":"โอน/พร้อมเพย์")))return;
-  api("/rest/v1/bills?id=eq."+b.id,"PATCH",{status:"paid",paid_method:method,paid_at:new Date().toISOString()}).then(poll).catch(function(){alert("ปิดบิลไม่สำเร็จ ลองอีกครั้ง")});
+  var t=total(itemsOf(b)),label=(b.tables||{}).label;
+  if(method==="cash"){
+    if(!confirm("ปิดบิลโต๊ะ "+label+"\nยอด "+money(t)+"\nชำระด้วยเงินสด"))return;
+    payBill(b.id,"cash");return;
+  }
+  if(t<=0){if(confirm("ยอดบิลเป็น 0 บาท ปิดบิลเลยหรือไม่?"))payBill(b.id,"promptpay");return}
+  showQR(b.id,label,t);
+}
+function closeQR(){var m=document.getElementById("qrm");if(m)m.remove()}
+function showQR(id,label,t){
+  closeQR();
+  var m=document.createElement("div");m.id="qrm";m.className="modal";
+  m.innerHTML='<div class="mbox"><h2>โต๊ะ '+esc(label)+'</h2><div class="amt">'+money(t)+'</div><div id="qrc"></div><div class="who">'+esc(PP_NAME)+'</div><div class="t">ให้ลูกค้าสแกนจ่ายด้วยแอปธนาคาร<br>ตรวจว่าเงินเข้าแล้วก่อนกดปิดบิล</div><button class="big" id="qok">ได้รับเงินแล้ว ปิดบิล</button><button class="sm" id="qno" style="width:100%;margin-top:8px">ยกเลิก</button></div>';
+  document.body.appendChild(m);
+  try{new QRCode(document.getElementById("qrc"),{text:ppPayload(t),width:240,height:240,correctLevel:QRCode.CorrectLevel.M})}catch(e){document.getElementById("qrc").textContent="สร้าง QR ไม่ได้"}
+  document.getElementById("qok").onclick=function(){closeQR();payBill(id,"promptpay")};
+  document.getElementById("qno").onclick=closeQR;
 }
 function cancelItem(id){
   if(!confirm("ยกเลิกรายการนี้?"))return;
